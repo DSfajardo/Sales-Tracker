@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>School Renewal Race</title>
+<style>
+:root{
+  --bg:#f4f7fb; --card:#ffffff; --track:#e6ebf2; --text:#1c2430; --muted:#6b7686;
+  --accent:#2563eb; --accent2:#16a34a; --finish:#111827; --border:#e2e8f0;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0f1420; --card:#171e2c; --track:#232c3f; --text:#e8ecf3; --muted:#93a0b4;
+    --accent:#4f8cff; --accent2:#34d17a; --finish:#f4f7fb; --border:#2a3346;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:920px;margin:0 auto;padding:16px}
+.topbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+h1{font-size:18px;margin:0;flex:1}
+button{background:var(--accent);color:#fff;border:none;padding:9px 14px;border-radius:8px;font-size:14px;cursor:pointer}
+button:disabled{opacity:.6;cursor:default}
+select{padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:13px}
+.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.controls label{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.status{font-size:12px;color:var(--muted);width:100%}
+.lanes{display:flex;flex-direction:column;gap:10px;max-height:66vh;overflow-y:auto;padding-right:4px}
+.lane{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+.lane-head{display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px}
+.lane-name{font-weight:600}
+.lane-frac{color:var(--muted)}
+.track{position:relative;height:34px;background:var(--track);border-radius:17px;overflow:visible}
+.finish{position:absolute;right:6px;top:0;bottom:0;width:3px;background:var(--finish);opacity:.5}
+.racer{position:absolute;top:2px;width:30px;height:30px;border-radius:50%;background:var(--accent2);
+  color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;
+  transform:translateX(-50%);transition:left .5s ease;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.25);
+  background-size:cover;background-position:center}
+.editrow{display:none;gap:10px;align-items:center;margin-top:8px;font-size:13px;flex-wrap:wrap}
+.editrow.open{display:flex}
+.editrow input[type=number]{width:70px;padding:5px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text)}
+.editrow button{padding:6px 10px}
+.editrow .photoLabel{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+.empty{color:var(--muted);font-size:14px;padding:24px;text-align:center}
+#peek{position:fixed;display:none;z-index:50;background:var(--finish);color:var(--bg);border-radius:8px;
+  padding:8px;font-size:12px;box-shadow:0 4px 14px rgba(0,0,0,.3);pointer-events:none;text-align:center}
+#peek img{display:block;width:72px;height:72px;object-fit:cover;border-radius:6px;margin-bottom:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <h1>🏁 School Renewal Race</h1>
+    <button id="refreshBtn">Refresh</button>
+  </div>
+  <div class="controls">
+    <label>Filter area: <select id="filterTeam"><option value="">All</option></select></label>
+    <label>Sort by:
+      <select id="sortBy">
+        <option value="name">Name</option>
+        <option value="progress">Progress %</option>
+        <option value="renewed">Schools renewed</option>
+      </select>
+    </label>
+    <div class="status" id="status">Loading…</div>
+  </div>
+  <div class="lanes" id="lanes"><div class="empty">Loading racers…</div></div>
+</div>
+<div id="peek"></div>
+<script>
+// PASTE your deployed Apps Script Web App URL here (ends in /exec):
+const API_URL = "https://script.google.com/macros/s/AKfycbybw7VWW4kdc6wWm9HEjkbbtpPTfREcRX55KH1AskiuKC6rUHu5eJ7Hp45a40Y9AiIh/exec";
+const POLL_MS = 15000; // how often to refresh from the sheet automatically
+
+const $status = document.getElementById('status');
+const $lanes = document.getElementById('lanes');
+const $refreshBtn = document.getElementById('refreshBtn');
+const $filterTeam = document.getElementById('filterTeam');
+const $sortBy = document.getElementById('sortBy');
+const $peek = document.getElementById('peek');
+let allRacers = [];
+
+function setStatus(msg){ $status.textContent = msg; }
+function initials(name){ return name.trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase(); }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function loadRacers(){
+  if(API_URL.includes('PASTE_YOUR')){
+    setStatus('Set API_URL in the HTML file to your deployed Apps Script URL first.');
+    return;
+  }
+  setStatus('Loading…');
+  try{
+    const res = await fetch(API_URL, {method:'GET'});
+    const data = await res.json();
+    allRacers = data.map(r=>({...r, id:r.name}));
+    refreshTeamOptions();
+    applyViewAndRender();
+    setStatus(allRacers.length + ' racers · updated ' + new Date().toLocaleTimeString());
+  }catch(err){
+    setStatus('Could not load data: '+err.message);
+  }
+}
+
+function refreshTeamOptions(){
+  const teams = Array.from(new Set(allRacers.map(r=>r.team).filter(Boolean))).sort();
+  const current = $filterTeam.value;
+  $filterTeam.innerHTML = '<option value="">All</option>' + teams.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+  if(teams.includes(current)) $filterTeam.value = current;
+}
+
+function applyViewAndRender(){
+  let list = allRacers.slice();
+  const teamFilter = $filterTeam.value;
+  if(teamFilter) list = list.filter(r=>r.team===teamFilter);
+  const sortBy = $sortBy.value;
+  if(sortBy==='name') list.sort((a,b)=>a.name.localeCompare(b.name));
+  else if(sortBy==='progress') list.sort((a,b)=>((b.target?b.renewed/b.target:0)-(a.target?a.renewed/a.target:0)));
+  else if(sortBy==='renewed') list.sort((a,b)=>b.renewed-a.renewed);
+  render(list);
+}
+
+function render(racers){
+  if(!racers.length){
+    $lanes.innerHTML = '<div class="empty">No racers to show.</div>';
+    return;
+  }
+  $lanes.innerHTML='';
+  racers.forEach(r=>{
+    const pct = r.target>0 ? Math.min(100,(r.renewed/r.target)*100) : 0;
+    const lane = document.createElement('div');
+    lane.className='lane';
+    const photoStyle = r.photoUrl ? `background-image:url('${r.photoUrl}')` : '';
+    lane.innerHTML = `
+      <div class="lane-head"><span class="lane-name">${escapeHtml(r.name)}${r.team? ' · '+escapeHtml(r.team):''}</span><span class="lane-frac">${r.renewed}/${r.target}</span></div>
+      <div class="track"><div class="finish"></div>
+        <div class="racer" style="left:${pct}%;${photoStyle}">${r.photoUrl?'':initials(r.name)}</div>
+      </div>
+      <div class="editrow" data-name="${escapeHtml(r.name)}">
+        <label>Renewed: <input type="number" min="0" class="renewedInput" value="${r.renewed}"></label>
+        <button class="saveBtn">Save</button>
+        <span class="photoLabel">Photo: <input type="file" accept="image/*" class="photoInput"></span>
+      </div>`;
+    const racerEl = lane.querySelector('.racer');
+    const editRow = lane.querySelector('.editrow');
+    racerEl.addEventListener('click', ()=> editRow.classList.toggle('open'));
+    racerEl.addEventListener('mouseenter', ()=>{
+      const rect = racerEl.getBoundingClientRect();
+      $peek.innerHTML = (r.photoUrl? `<img src="${r.photoUrl}">` : '') + `${escapeHtml(r.name)}<br>${r.renewed}/${r.target}`;
+      $peek.style.left = (rect.left+rect.width/2)+'px';
+      $peek.style.top = (rect.top-8)+'px';
+      $peek.style.transform = 'translate(-50%,-100%)';
+      $peek.style.display = 'block';
+    });
+    racerEl.addEventListener('mouseleave', ()=>{ $peek.style.display='none'; });
+
+    editRow.querySelector('.saveBtn').addEventListener('click', async ()=>{
+      const val = parseFloat(editRow.querySelector('.renewedInput').value)||0;
+      setStatus('Saving…');
+      try{
+        await fetch(API_URL, {
+          method:'POST',
+          headers:{'Content-Type':'text/plain;charset=utf-8'}, // avoids CORS preflight against Apps Script
+          body: JSON.stringify({action:'updateRenewed', name:r.name, renewed:val})
+        });
+        editRow.classList.remove('open');
+        loadRacers();
+      }catch(e){ setStatus('Could not save: '+e.message); }
+    });
+
+    editRow.querySelector('.photoInput').addEventListener('change', async (e)=>{
+      const file = e.target.files[0];
+      if(!file) return;
+      setStatus('Uploading photo…');
+      try{
+        const base64 = await fileToBase64(file);
+        await fetch(API_URL, {
+          method:'POST',
+          headers:{'Content-Type':'text/plain;charset=utf-8'},
+          body: JSON.stringify({action:'uploadPhoto', name:r.name, imageBase64: base64, mimeType: file.type})
+        });
+        setStatus('Photo updated for '+r.name);
+        loadRacers();
+      }catch(err){ setStatus('Photo upload failed: '+err.message); }
+    });
+
+    $lanes.appendChild(lane);
+  });
+}
+
+function fileToBase64(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = ()=> resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+$refreshBtn.addEventListener('click', loadRacers);
+$filterTeam.addEventListener('change', applyViewAndRender);
+$sortBy.addEventListener('change', applyViewAndRender);
+loadRacers();
+setInterval(loadRacers, POLL_MS);
+</script>
+</body>
+</html>
