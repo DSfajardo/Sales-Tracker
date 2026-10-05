@@ -159,15 +159,16 @@ function render(racers){
       const val = parseFloat(editRow.querySelector('.renewedInput').value)||0;
       setStatus('Saving…');
       try{
-        const res = await fetch(API_URL, {
-          method:'POST',
-          headers:{'Content-Type':'text/plain;charset=utf-8'}, // avoids CORS preflight against Apps Script
-          body: JSON.stringify({action:'updateRenewed', name:r.name, renewed:val})
-        });
-        const result = await res.json();
-        if(!result.ok){ setStatus('Save failed: '+(result.message||result.error)); return; }
-        editRow.classList.remove('open');
-        loadRacers();
+        await postToApi({action:'updateRenewed', name:r.name, renewed:val});
+        await new Promise(res=>setTimeout(res, 1200));
+        await loadRacers();
+        const updated = allRacers.find(x=>x.name===r.name);
+        if(updated && Number(updated.renewed)===val){
+          setStatus('Saved '+r.name);
+          editRow.classList.remove('open');
+        } else {
+          setStatus('Save sent, but not yet confirmed — click Refresh in a moment.');
+        }
       }catch(e){ setStatus('Could not save: '+e.message); }
     });
 
@@ -177,19 +178,33 @@ function render(racers){
       setStatus('Uploading photo…');
       try{
         const base64 = await fileToBase64(file);
-        const res = await fetch(API_URL, {
-          method:'POST',
-          headers:{'Content-Type':'text/plain;charset=utf-8'},
-          body: JSON.stringify({action:'uploadPhoto', name:r.name, imageBase64: base64, mimeType: file.type})
-        });
-        const result = await res.json();
-        if(!result.ok){ setStatus('Photo upload failed: '+(result.message||result.error)); return; }
-        setStatus('Photo updated for '+r.name);
-        loadRacers();
+        await postToApi({action:'uploadPhoto', name:r.name, imageBase64: base64, mimeType: file.type});
+        await new Promise(res=>setTimeout(res, 2000));
+        await loadRacers();
+        const updated = allRacers.find(x=>x.name===r.name);
+        if(updated && updated.photoUrl){
+          setStatus('Photo updated for '+r.name);
+        } else {
+          setStatus('Photo sent, but not yet confirmed — click Refresh in a moment.');
+        }
       }catch(err){ setStatus('Photo upload failed: '+err.message); }
     });
 
     $lanes.appendChild(lane);
+  });
+}
+
+async function postToApi(payload){
+  // Apps Script POST responses don't carry an Access-Control-Allow-Origin
+  // header, so the browser blocks reading the response body cross-origin.
+  // no-cors still lets the request through (and the script still runs,
+  // writing to the Sheet) — we just can't read a confirmation back here,
+  // so callers re-fetch the data afterward to confirm the change landed.
+  await fetch(API_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    headers: {'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify(payload)
   });
 }
 
