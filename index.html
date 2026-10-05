@@ -159,11 +159,13 @@ function render(racers){
       const val = parseFloat(editRow.querySelector('.renewedInput').value)||0;
       setStatus('Saving…');
       try{
-        await fetch(API_URL, {
+        const res = await fetch(API_URL, {
           method:'POST',
           headers:{'Content-Type':'text/plain;charset=utf-8'}, // avoids CORS preflight against Apps Script
           body: JSON.stringify({action:'updateRenewed', name:r.name, renewed:val})
         });
+        const result = await res.json();
+        if(!result.ok){ setStatus('Save failed: '+(result.message||result.error)); return; }
         editRow.classList.remove('open');
         loadRacers();
       }catch(e){ setStatus('Could not save: '+e.message); }
@@ -175,11 +177,13 @@ function render(racers){
       setStatus('Uploading photo…');
       try{
         const base64 = await fileToBase64(file);
-        await fetch(API_URL, {
+        const res = await fetch(API_URL, {
           method:'POST',
           headers:{'Content-Type':'text/plain;charset=utf-8'},
           body: JSON.stringify({action:'uploadPhoto', name:r.name, imageBase64: base64, mimeType: file.type})
         });
+        const result = await res.json();
+        if(!result.ok){ setStatus('Photo upload failed: '+(result.message||result.error)); return; }
         setStatus('Photo updated for '+r.name);
         loadRacers();
       }catch(err){ setStatus('Photo upload failed: '+err.message); }
